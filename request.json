@@ -4,7 +4,7 @@
   "requirements": [
     "setuptools>=68.0",
     "docutils",
-    "mcp[cli]>=1.2.0",
+    "mcp[cli]>=1.2.0,<2",
     "pyyaml"
   ]
 }
