@@ -17,9 +17,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select Python runtime
+        id: runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          req = json.load(open('request.json', 'r', encoding='utf-8'))
+          version = str(req.get('python_version', '3.13')).strip()
+          if not re.fullmatch(r'3\.(10|11|12|13|14)', version):
+              raise SystemExit('python_version must be one of 3.10..3.14')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f'python_version={version}\n')
+          PY
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ steps.runtime.outputs.python_version }}
 
       - name: Validate request
         shell: bash

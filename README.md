@@ -29,11 +29,12 @@ Clones a public HTTPS Git repository without submodules. An optional `ref` pins 
 ```
 
 ### `pip`
-Uses Python 3.11 on the GitHub runner to download package-index distributions and all transitive dependencies into the artifact. Direct URLs, local paths and pip command-line options are rejected.
+Uses a requested CPython version (3.10..3.14; default 3.13) on the GitHub runner to download package-index distributions and all transitive dependencies into the artifact. Direct URLs, local paths and pip command-line options are rejected.
 
 ```json
 {
   "mode": "pip",
+  "python_version": "3.13",
   "requirements": [
     "mcp[cli]>=1.2.0",
     "docutils",
