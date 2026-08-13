@@ -1,0 +1,206 @@
+name: Download bridge
+
+on:
+  push:
+    paths:
+      - request.json
+      - .github/workflows/fetch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ipaddress
+          import json
+          import re
+          import socket
+          from urllib.parse import urlsplit
+
+          req = json.load(open('request.json', 'r', encoding='utf-8'))
+          mode = req.get('mode')
+          if mode not in {'url', 'git', 'pip'}:
+              raise SystemExit('mode must be one of: url, git, pip')
+
+          def check_public_https(url: str) -> None:
+              p = urlsplit(url)
+              if p.scheme != 'https' or not p.hostname:
+                  raise SystemExit('only public https:// URLs are allowed')
+              if p.username or p.password:
+                  raise SystemExit('credentials in URL are not allowed')
+              infos = socket.getaddrinfo(p.hostname, p.port or 443, type=socket.SOCK_STREAM)
+              ips = {row[4][0] for row in infos}
+              if not ips:
+                  raise SystemExit('hostname did not resolve')
+              for raw in ips:
+                  if not ipaddress.ip_address(raw).is_global:
+                      raise SystemExit(f'non-public destination blocked: {raw}')
+
+          if mode == 'url':
+              url = str(req.get('url', '')).strip()
+              check_public_https(url)
+              filename = str(req.get('filename', '')).strip()
+              if not filename or filename in {'.', '..'} or '/' in filename or '\\' in filename:
+                  raise SystemExit('filename must be a simple basename')
+              expected = str(req.get('sha256', '')).strip().lower()
+              if expected and not re.fullmatch(r'[0-9a-f]{64}', expected):
+                  raise SystemExit('sha256 must be empty or 64 hex characters')
+
+          elif mode == 'git':
+              url = str(req.get('url', '')).strip()
+              check_public_https(url)
+              if not url.endswith('.git'):
+                  raise SystemExit('git mode URL must end in .git')
+              ref = str(req.get('ref', '')).strip()
+              if ref and (len(ref) > 200 or ref.startswith('-') or any(c.isspace() for c in ref)):
+                  raise SystemExit('invalid git ref')
+
+          else:
+              requirements = req.get('requirements')
+              if not isinstance(requirements, list) or not requirements or len(requirements) > 100:
+                  raise SystemExit('pip mode requires 1..100 requirements')
+              allowed = re.compile(r'^[A-Za-z0-9_.!<>=~,+\[\]*-]+$')
+              for item in requirements:
+                  if not isinstance(item, str) or not item or len(item) > 300:
+                      raise SystemExit('invalid pip requirement')
+                  if item.startswith('-') or '://' in item or '@' in item or '/' in item or '\\' in item:
+                      raise SystemExit(f'only package-index requirements are allowed: {item!r}')
+                  if not allowed.fullmatch(item):
+                      raise SystemExit(f'unsupported requirement syntax: {item!r}')
+          PY
+
+      - name: Execute request
+        id: execute
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf payload
+          mkdir -p payload
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          req = json.load(open('request.json', 'r', encoding='utf-8'))
+          mode = req['mode']
+
+          if mode == 'url':
+              filename = req['filename']
+              max_bytes = int(req.get('max_bytes', 2147483648))
+              if not 1 <= max_bytes <= 2147483648:
+                  raise SystemExit('max_bytes must be between 1 and 2147483648')
+              subprocess.run([
+                  'curl', '--fail', '--location', '--show-error', '--silent',
+                  '--retry', '3', '--retry-all-errors', '--connect-timeout', '30',
+                  '--max-time', '3600', '--max-filesize', str(max_bytes),
+                  '--output', os.path.join('payload', filename), req['url'],
+              ], check=True)
+              if os.path.getsize(os.path.join('payload', filename)) == 0:
+                  raise SystemExit('downloaded file is empty')
+
+          elif mode == 'git':
+              cmd = ['git', 'clone', '--depth', '1', '--no-tags']
+              ref = str(req.get('ref', '')).strip()
+              if ref:
+                  cmd += ['--branch', ref]
+              cmd += [req['url'], 'payload/source']
+              subprocess.run(cmd, check=True)
+              subprocess.run(['git', '-C', 'payload/source', 'rev-parse', 'HEAD'], check=True)
+
+          elif mode == 'pip':
+              requirements = list(req['requirements'])
+              subprocess.run([
+                  sys.executable, '-m', 'pip', 'download',
+                  '--disable-pip-version-check', '--dest', 'payload', *requirements,
+              ], check=True)
+          PY
+
+      - name: Verify and write manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+
+          req = json.load(open('request.json', 'r', encoding='utf-8'))
+          records = []
+          for root, dirs, files in os.walk('payload'):
+              if '.git' in dirs:
+                  dirs.remove('.git')
+              for name in sorted(files):
+                  path = os.path.join(root, name)
+                  rel = os.path.relpath(path, 'payload')
+                  h = hashlib.sha256()
+                  with open(path, 'rb') as f:
+                      for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                          h.update(chunk)
+                  try:
+                      mime = subprocess.check_output(['file', '-b', '--mime-type', path], text=True).strip()
+                  except Exception:
+                      mime = ''
+                  records.append({
+                      'path': rel,
+                      'size_bytes': os.path.getsize(path),
+                      'sha256': h.hexdigest(),
+                      'mime_type': mime,
+                  })
+
+          if req['mode'] == 'url':
+              expected = str(req.get('sha256', '')).strip().lower()
+              if expected:
+                  target = next((x for x in records if x['path'] == req['filename']), None)
+                  if not target or target['sha256'] != expected:
+                      actual = None if not target else target['sha256']
+                      raise SystemExit(f'SHA-256 mismatch: expected={expected} actual={actual}')
+
+          git_commit = ''
+          if req['mode'] == 'git':
+              git_commit = subprocess.check_output(
+                  ['git', '-C', 'payload/source', 'rev-parse', 'HEAD'], text=True
+              ).strip()
+
+          manifest = {
+              'schema_version': 1,
+              'request': req,
+              'files': records,
+              'git_commit': git_commit,
+              'github_repository': os.environ.get('GITHUB_REPOSITORY', ''),
+              'github_run_id': os.environ.get('GITHUB_RUN_ID', ''),
+              'github_sha': os.environ.get('GITHUB_SHA', ''),
+          }
+          with open('payload/manifest.json', 'w', encoding='utf-8') as f:
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
+              f.write('\n')
+
+          if req['mode'] == 'git':
+              import shutil
+              shutil.rmtree('payload/source/.git', ignore_errors=True)
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetched-file
+          path: payload/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
