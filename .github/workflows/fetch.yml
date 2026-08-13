@@ -121,7 +121,17 @@ jobs:
                   cmd += ['--branch', ref]
               cmd += [req['url'], 'payload/source']
               subprocess.run(cmd, check=True)
-              subprocess.run(['git', '-C', 'payload/source', 'rev-parse', 'HEAD'], check=True)
+              commit = subprocess.check_output(
+                  ['git', '-C', 'payload/source', 'rev-parse', 'HEAD'], text=True
+              ).strip()
+              with open('payload/git_commit.txt', 'w', encoding='utf-8') as f:
+                  f.write(commit + '\n')
+              import shutil
+              shutil.rmtree('payload/source/.git', ignore_errors=True)
+              subprocess.run([
+                  'tar', '-C', 'payload', '-czf', 'payload/source.tar.gz', 'source'
+              ], check=True)
+              shutil.rmtree('payload/source')
 
           elif mode == 'pip':
               requirements = list(req['requirements'])
@@ -174,9 +184,7 @@ jobs:
 
           git_commit = ''
           if req['mode'] == 'git':
-              git_commit = subprocess.check_output(
-                  ['git', '-C', 'payload/source', 'rev-parse', 'HEAD'], text=True
-              ).strip()
+              git_commit = open('payload/git_commit.txt', 'r', encoding='utf-8').read().strip()
 
           manifest = {
               'schema_version': 1,
@@ -191,9 +199,6 @@ jobs:
               json.dump(manifest, f, ensure_ascii=False, indent=2)
               f.write('\n')
 
-          if req['mode'] == 'git':
-              import shutil
-              shutil.rmtree('payload/source/.git', ignore_errors=True)
           PY
 
       - name: Upload artifact
