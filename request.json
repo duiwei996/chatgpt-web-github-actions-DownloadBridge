@@ -1,7 +1,5 @@
 {
-  "mode": "url",
-  "url": "https://www.rfc-editor.org/rfc/rfc9110.txt",
-  "filename": "rfc9110.txt",
-  "sha256": "",
-  "max_bytes": 2147483648
+  "mode": "git",
+  "url": "https://projects.blender.org/lab/blender_mcp.git",
+  "ref": ""
 }
