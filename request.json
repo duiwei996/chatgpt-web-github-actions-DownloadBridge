@@ -1,5 +1,10 @@
 {
-  "mode": "git",
-  "url": "https://projects.blender.org/lab/blender_mcp.git",
-  "ref": ""
+  "mode": "pip",
+  "python_version": "3.13",
+  "requirements": [
+    "setuptools>=68.0",
+    "docutils",
+    "mcp[cli]>=1.2.0",
+    "pyyaml"
+  ]
 }
