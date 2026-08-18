@@ -1,4 +1,4 @@
-# duiwei-download-bridge
+# DownloadBridge
 
 A small private GitHub Actions bridge for moving public software sources and dependencies into an Actions artifact that ChatGPT's GitHub Connector can download.
 
