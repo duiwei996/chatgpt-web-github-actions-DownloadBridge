@@ -1,4 +1,4 @@
-name: Download bridge
+name: DownloadBridge 下载桥
 
 on:
   push:
@@ -12,12 +12,14 @@ permissions:
 
 jobs:
   fetch:
+    name: 获取并校验资源
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出仓库
+        uses: actions/checkout@v4
 
-      - name: Select Python runtime
+      - name: 选择 Python 运行时
         id: runtime
         shell: bash
         run: |
@@ -29,16 +31,17 @@ jobs:
           req = json.load(open('request.json', 'r', encoding='utf-8'))
           version = str(req.get('python_version', '3.13')).strip()
           if not re.fullmatch(r'3\.(10|11|12|13|14)', version):
-              raise SystemExit('python_version must be one of 3.10..3.14')
+              raise SystemExit('python_version 必须为 3.10 到 3.14 之一')
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write(f'python_version={version}\n')
           PY
 
-      - uses: actions/setup-python@v5
+      - name: 配置 Python
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ steps.runtime.outputs.python_version }}
 
-      - name: Validate request
+      - name: 校验请求
         shell: bash
         run: |
           set -euo pipefail
@@ -52,56 +55,56 @@ jobs:
           req = json.load(open('request.json', 'r', encoding='utf-8'))
           mode = req.get('mode')
           if mode not in {'url', 'git', 'pip'}:
-              raise SystemExit('mode must be one of: url, git, pip')
+              raise SystemExit('mode 必须为 url、git 或 pip')
 
           def check_public_https(url: str) -> None:
               p = urlsplit(url)
               if p.scheme != 'https' or not p.hostname:
-                  raise SystemExit('only public https:// URLs are allowed')
+                  raise SystemExit('只允许公开的 https:// URL')
               if p.username or p.password:
-                  raise SystemExit('credentials in URL are not allowed')
+                  raise SystemExit('URL 中不允许包含用户名或密码')
               infos = socket.getaddrinfo(p.hostname, p.port or 443, type=socket.SOCK_STREAM)
               ips = {row[4][0] for row in infos}
               if not ips:
-                  raise SystemExit('hostname did not resolve')
+                  raise SystemExit('目标主机名无法解析')
               for raw in ips:
                   if not ipaddress.ip_address(raw).is_global:
-                      raise SystemExit(f'non-public destination blocked: {raw}')
+                      raise SystemExit(f'已阻止非公网目标地址: {raw}')
 
           if mode == 'url':
               url = str(req.get('url', '')).strip()
               check_public_https(url)
               filename = str(req.get('filename', '')).strip()
               if not filename or filename in {'.', '..'} or '/' in filename or '\\' in filename:
-                  raise SystemExit('filename must be a simple basename')
+                  raise SystemExit('filename 必须是简单文件名，不能包含目录路径')
               expected = str(req.get('sha256', '')).strip().lower()
               if expected and not re.fullmatch(r'[0-9a-f]{64}', expected):
-                  raise SystemExit('sha256 must be empty or 64 hex characters')
+                  raise SystemExit('sha256 必须为空或 64 位十六进制字符')
 
           elif mode == 'git':
               url = str(req.get('url', '')).strip()
               check_public_https(url)
               if not url.endswith('.git'):
-                  raise SystemExit('git mode URL must end in .git')
+                  raise SystemExit('git 模式的 URL 必须以 .git 结尾')
               ref = str(req.get('ref', '')).strip()
               if ref and (len(ref) > 200 or ref.startswith('-') or any(c.isspace() for c in ref)):
-                  raise SystemExit('invalid git ref')
+                  raise SystemExit('Git ref 格式无效')
 
           else:
               requirements = req.get('requirements')
               if not isinstance(requirements, list) or not requirements or len(requirements) > 100:
-                  raise SystemExit('pip mode requires 1..100 requirements')
+                  raise SystemExit('pip 模式必须提供 1 到 100 个 requirements')
               allowed = re.compile(r'^[A-Za-z0-9_.!<>=~,+\[\]*-]+$')
               for item in requirements:
                   if not isinstance(item, str) or not item or len(item) > 300:
-                      raise SystemExit('invalid pip requirement')
+                      raise SystemExit('pip requirement 格式无效')
                   if item.startswith('-') or '://' in item or '@' in item or '/' in item or '\\' in item:
-                      raise SystemExit(f'only package-index requirements are allowed: {item!r}')
+                      raise SystemExit(f'只允许包索引 requirements: {item!r}')
                   if not allowed.fullmatch(item):
-                      raise SystemExit(f'unsupported requirement syntax: {item!r}')
+                      raise SystemExit(f'不支持的 requirement 语法: {item!r}')
           PY
 
-      - name: Execute request
+      - name: 执行资源获取
         id: execute
         shell: bash
         run: |
@@ -121,7 +124,7 @@ jobs:
               filename = req['filename']
               max_bytes = int(req.get('max_bytes', 2147483648))
               if not 1 <= max_bytes <= 2147483648:
-                  raise SystemExit('max_bytes must be between 1 and 2147483648')
+                  raise SystemExit('max_bytes 必须在 1 到 2147483648 之间')
               subprocess.run([
                   'curl', '--fail', '--location', '--show-error', '--silent',
                   '--retry', '3', '--retry-all-errors', '--connect-timeout', '30',
@@ -129,7 +132,7 @@ jobs:
                   '--output', os.path.join('payload', filename), req['url'],
               ], check=True)
               if os.path.getsize(os.path.join('payload', filename)) == 0:
-                  raise SystemExit('downloaded file is empty')
+                  raise SystemExit('下载文件为空')
 
           elif mode == 'git':
               cmd = ['git', 'clone', '--depth', '1', '--no-tags']
@@ -158,7 +161,7 @@ jobs:
               ], check=True)
           PY
 
-      - name: Verify and write manifest
+      - name: 校验并生成来源清单
         shell: bash
         run: |
           set -euo pipefail
@@ -197,7 +200,7 @@ jobs:
                   target = next((x for x in records if x['path'] == req['filename']), None)
                   if not target or target['sha256'] != expected:
                       actual = None if not target else target['sha256']
-                      raise SystemExit(f'SHA-256 mismatch: expected={expected} actual={actual}')
+                      raise SystemExit(f'SHA-256 不匹配: 预期={expected} 实际={actual}')
 
           git_commit = ''
           if req['mode'] == 'git':
@@ -218,7 +221,7 @@ jobs:
 
           PY
 
-      - name: Upload artifact
+      - name: 上传已校验产物
         uses: actions/upload-artifact@v4
         with:
           name: fetched-file
