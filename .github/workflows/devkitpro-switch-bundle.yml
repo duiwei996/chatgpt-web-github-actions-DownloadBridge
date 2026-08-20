@@ -7,14 +7,63 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
+  TOOLCHAIN_REVISION: "v1"
+  RELEASE_TAG: "astranas-devkitpro-v1"
+  DEVKITPRO_IMAGE: "devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282"
   LIBSMB2_COMMIT: "0b2aa4310c7a0510c666fe7da0eebce0f7e93824"
   LIBUSBHSFS_COMMIT: "3b897ed6a79c910aa3f13693f17b80afb802b3b5"
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      build_needed: ${{ steps.cache.outputs.build_needed }}
+    steps:
+      - name: 检出下载桥
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 记录本次运行 ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '{"run_id":%s,"sha":"%s","release_tag":"%s"}\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_SHA" "$RELEASE_TAG" > last_devkitpro_run.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add last_devkitpro_run.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'chore: record devkitPro bundle run'
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: 检查长期工具链缓存
+        id: cache
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          if grep -qx 'devkitpro-switch-astranas.tar.gz' <<<"$assets" && \
+             grep -qx 'SHA256SUMS.txt' <<<"$assets" && \
+             grep -qx 'environment.txt' <<<"$assets"; then
+            echo "build_needed=false" >> "$GITHUB_OUTPUT"
+            echo "长期 Release 缓存 $RELEASE_TAG 已存在，本次不重复构建。"
+          else
+            echo "build_needed=true" >> "$GITHUB_OUTPUT"
+            echo "长期 Release 缓存不存在，将构建 $TOOLCHAIN_REVISION。"
+          fi
+
   bundle:
+    needs: preflight
+    if: needs.preflight.outputs.build_needed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     container:
@@ -80,6 +129,9 @@ jobs:
             pacman -Q > payload/devkitpro-packages.txt
           fi
           printf '%s\n' \
+            "TOOLCHAIN_REVISION=$TOOLCHAIN_REVISION" \
+            "RELEASE_TAG=$RELEASE_TAG" \
+            "DEVKITPRO_IMAGE=$DEVKITPRO_IMAGE" \
             'DEVKITPRO=/opt/devkitpro' \
             'DEVKITA64=/opt/devkitpro/devkitA64' \
             "LIBSMB2_COMMIT=$LIBSMB2_COMMIT" \
@@ -97,10 +149,42 @@ jobs:
           sha256sum payload/devkitpro-switch-astranas.tar.gz > payload/SHA256SUMS.txt
           du -h payload/devkitpro-switch-astranas.tar.gz
 
-      - name: 上传编译环境 Artifact
+      - name: 上传短期 Artifact
         uses: actions/upload-artifact@v4
         with:
           name: devkitpro-switch-astranas
           path: payload/
           if-no-files-found: error
-          retention-days: 2
+          retention-days: 7
+
+  publish:
+    needs: bundle
+    if: needs.bundle.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载刚构建的工具链
+        uses: actions/download-artifact@v4
+        with:
+          name: devkitpro-switch-astranas
+          path: payload
+
+      - name: 发布到长期 Release 资料库
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "AstraNAS devkitPro toolchain $TOOLCHAIN_REVISION" \
+              --notes "AstraNAS 可复用 Switch 编译环境。依赖版本固定；升级工具链或依赖时请递增 TOOLCHAIN_REVISION/RELEASE_TAG，而不是覆盖旧版本。"
+          fi
+          gh release upload "$RELEASE_TAG" \
+            payload/devkitpro-switch-astranas.tar.gz \
+            payload/SHA256SUMS.txt \
+            payload/environment.txt \
+            payload/devkitpro-packages.txt \
+            --clobber \
+            --repo "$GITHUB_REPOSITORY"
+          cat payload/SHA256SUMS.txt
