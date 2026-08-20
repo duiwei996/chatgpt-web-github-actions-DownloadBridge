@@ -1,0 +1,10 @@
+{
+  "mode": "pip",
+  "python_version": "3.13",
+  "requirements": [
+    "setuptools>=68.0",
+    "docutils",
+    "mcp[cli]>=1.2.0,<2",
+    "pyyaml"
+  ]
+}
