@@ -1,0 +1,39 @@
+name: DownloadBridge devkitPro 运行记录
+
+on:
+  push:
+    paths:
+      - .github/workflows/devkitpro-switch-bundle.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 查询对应的 bundle run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            run_id="$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/devkitpro-switch-bundle.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=10" --jq '.workflow_runs[0].id // empty')"
+            if [ -n "$run_id" ]; then
+              printf '{"run_id":%s,"sha":"%s"}\n' "$run_id" "$GITHUB_SHA" > last_devkitpro_run.json
+              break
+            fi
+            sleep 5
+          done
+          test -s last_devkitpro_run.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add last_devkitpro_run.json
+          git commit -m 'chore: record devkitPro bundle run' || exit 0
+          git push
