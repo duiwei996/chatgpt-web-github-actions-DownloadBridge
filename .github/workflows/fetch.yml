@@ -1,11 +1,11 @@
 name: DownloadBridge 下载桥
 
 on:
-  push:
-    paths:
-      - request.json
-      - .github/workflows/fetch.yml
   workflow_dispatch:
+
+concurrency:
+  group: downloadbridge-fetch
+  cancel-in-progress: true
 
 permissions:
   contents: read
