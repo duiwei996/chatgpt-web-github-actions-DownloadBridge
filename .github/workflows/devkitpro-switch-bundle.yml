@@ -1,5 +1,4 @@
 name: DownloadBridge devkitPro Switch 编译环境
-# Trigger bundle and monitor after monitor workflow was added.
 
 on:
   push:
@@ -8,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   LIBSMB2_COMMIT: "0b2aa4310c7a0510c666fe7da0eebce0f7e93824"
@@ -24,18 +23,6 @@ jobs:
     steps:
       - name: 检出下载桥
         uses: actions/checkout@v4
-
-      - name: 记录运行 ID
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf '{"run_id":%s,"sha":"%s"}\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > last_devkitpro_run.json
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add last_devkitpro_run.json
-          git commit -m 'chore: record devkitPro bundle run' || true
-          git push || true
 
       - name: 安装 AstraNAS 所需 Switch 依赖
         shell: bash
@@ -80,7 +67,6 @@ jobs:
           test -f /opt/devkitpro/portlibs/switch/lib/libsmb2.a
           test -f /opt/devkitpro/portlibs/switch/lib/libusbhsfs.a
           /opt/devkitpro/devkitA64/bin/aarch64-none-elf-g++ --version | head -n 1
-          /opt/devkitpro/tools/bin/elf2nro --help >/dev/null 2>&1 || true
 
       - name: 打包可搬运编译环境
         shell: bash
@@ -102,15 +88,14 @@ jobs:
             "GITHUB_RUN_ID=$GITHUB_RUN_ID" \
             > payload/environment.txt
 
-          tar -C /opt -cf - \
+          tar -C /opt -czf payload/devkitpro-switch-astranas.tar.gz \
             devkitpro/devkitA64 \
             devkitpro/libnx \
             devkitpro/portlibs/switch \
             devkitpro/tools \
-            devkitpro/cmake \
-            | zstd -T0 -10 -q -o payload/devkitpro-switch-astranas.tar.zst
-          sha256sum payload/devkitpro-switch-astranas.tar.zst > payload/SHA256SUMS.txt
-          du -h payload/devkitpro-switch-astranas.tar.zst
+            devkitpro/cmake
+          sha256sum payload/devkitpro-switch-astranas.tar.gz > payload/SHA256SUMS.txt
+          du -h payload/devkitpro-switch-astranas.tar.gz
 
       - name: 上传编译环境 Artifact
         uses: actions/upload-artifact@v4
