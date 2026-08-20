@@ -3,14 +3,20 @@ name: One-time branch cleanup
 on:
   issues:
     types: [opened]
+  pull_request:
+    types: [opened]
 
 permissions:
   contents: write
   issues: read
+  pull-requests: read
 
 jobs:
   cleanup:
-    if: github.actor == 'duiwei996' && github.event.issue.title == 'RUN-BRANCH-CLEANUP-20260820-A7F3C9'
+    if: >-
+      github.actor == 'duiwei996' &&
+      ((github.event_name == 'issues' && github.event.issue.title == 'RUN-BRANCH-CLEANUP-20260820-A7F3C9') ||
+       (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'chore/public-branch-cleanup-trigger'))
     runs-on: ubuntu-latest
     steps:
       - name: Delete all branches except main
