@@ -1,0 +1,51 @@
+name: One-time branch cleanup
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: read
+
+jobs:
+  cleanup:
+    if: github.actor == 'duiwei996' && github.event.issue.title == 'RUN-BRANCH-CLEANUP-20260820-A7F3C9'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all branches except main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          API_URL: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          branches="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API_URL}/repos/${REPO}/git/matching-refs/heads" \
+            | jq -r '.[] | .ref | sub("^refs/heads/"; "")')"
+
+          while IFS= read -r branch; do
+            [ -z "$branch" ] && continue
+            if [ "$branch" = "main" ]; then
+              continue
+            fi
+            echo "Deleting branch: $branch"
+            curl --fail-with-body --silent --show-error \
+              -X DELETE \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${API_URL}/repos/${REPO}/git/refs/heads/${branch}"
+          done <<< "$branches"
+
+          echo "Remaining branches:"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API_URL}/repos/${REPO}/git/matching-refs/heads" \
+            | jq -r '.[].ref'
