@@ -1,0 +1,120 @@
+name: DownloadBridge devkitPro Switch 编译环境
+
+on:
+  push:
+    paths:
+      - .github/workflows/devkitpro-switch-bundle.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LIBSMB2_COMMIT: "0b2aa4310c7a0510c666fe7da0eebce0f7e93824"
+  LIBUSBHSFS_COMMIT: "3b897ed6a79c910aa3f13693f17b80afb802b3b5"
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
+
+    steps:
+      - name: 检出下载桥
+        uses: actions/checkout@v4
+
+      - name: 安装 AstraNAS 所需 Switch 依赖
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v dkp-pacman >/dev/null 2>&1; then
+            PM=dkp-pacman
+          else
+            PM=pacman
+          fi
+          "$PM" -S --needed --noconfirm \
+            switch-curl switch-libjson-c switch-ntfs-3g switch-lwext4 \
+            switch-freetype switch-harfbuzz switch-libjpeg-turbo
+
+          libsmb2_tmp="$(mktemp -d /tmp/astranas-libsmb2.XXXXXX)"
+          git init -q "$libsmb2_tmp"
+          git -C "$libsmb2_tmp" remote add origin https://github.com/sahlberg/libsmb2.git
+          git -C "$libsmb2_tmp" fetch --depth 1 origin "$LIBSMB2_COMMIT"
+          git -C "$libsmb2_tmp" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$libsmb2_tmp" rev-parse HEAD)" = "$LIBSMB2_COMMIT"
+          make -C "$libsmb2_tmp" -f Makefile.platform switch_install
+
+          usbhsfs_tmp="$(mktemp -d /tmp/astranas-usbhsfs.XXXXXX)"
+          git init -q "$usbhsfs_tmp"
+          git -C "$usbhsfs_tmp" remote add origin https://github.com/DarkMatterCore/libusbhsfs.git
+          git -C "$usbhsfs_tmp" fetch --depth 1 origin "$LIBUSBHSFS_COMMIT"
+          git -C "$usbhsfs_tmp" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$usbhsfs_tmp" rev-parse HEAD)" = "$LIBUSBHSFS_COMMIT"
+          make -C "$usbhsfs_tmp" BUILD_TYPE=GPL install
+
+      - name: 验证工具链
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /opt/devkitpro/devkitA64/bin/aarch64-none-elf-g++
+          test -f /opt/devkitpro/cmake/Switch.cmake
+          test -x /opt/devkitpro/tools/bin/elf2nro
+          test -x /opt/devkitpro/tools/bin/nacptool
+          test -f /opt/devkitpro/libnx/include/switch.h
+          test -f /opt/devkitpro/portlibs/switch/include/curl/curl.h
+          test -f /opt/devkitpro/portlibs/switch/include/smb2/smb2.h
+          test -f /opt/devkitpro/portlibs/switch/lib/libsmb2.a
+          test -f /opt/devkitpro/portlibs/switch/lib/libusbhsfs.a
+          /opt/devkitpro/devkitA64/bin/aarch64-none-elf-g++ --version | head -n 1
+          /opt/devkitpro/tools/bin/elf2nro --help >/dev/null 2>&1 || true
+
+      - name: 打包可搬运编译环境
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf payload
+          mkdir -p payload
+          if command -v dkp-pacman >/dev/null 2>&1; then
+            dkp-pacman -Q > payload/devkitpro-packages.txt
+          else
+            pacman -Q > payload/devkitpro-packages.txt
+          fi
+          printf '%s\n' \
+            'DEVKITPRO=/opt/devkitpro' \
+            'DEVKITA64=/opt/devkitpro/devkitA64' \
+            "LIBSMB2_COMMIT=$LIBSMB2_COMMIT" \
+            "LIBUSBHSFS_COMMIT=$LIBUSBHSFS_COMMIT" \
+            "GITHUB_SHA=$GITHUB_SHA" \
+            "GITHUB_RUN_ID=$GITHUB_RUN_ID" \
+            > payload/environment.txt
+
+          tar -C /opt -cf - \
+            devkitpro/devkitA64 \
+            devkitpro/libnx \
+            devkitpro/portlibs/switch \
+            devkitpro/tools \
+            devkitpro/cmake \
+            | zstd -T0 -10 -q -o payload/devkitpro-switch-astranas.tar.zst
+          sha256sum payload/devkitpro-switch-astranas.tar.zst > payload/SHA256SUMS.txt
+          du -h payload/devkitpro-switch-astranas.tar.zst
+
+      - name: 上传编译环境 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: devkitpro-switch-astranas
+          path: payload/
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: 记录运行 ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '{"run_id":%s,"sha":"%s"}\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > last_devkitpro_run.json
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add last_devkitpro_run.json
+          git commit -m 'chore: record devkitPro bundle run' || exit 0
+          git push
