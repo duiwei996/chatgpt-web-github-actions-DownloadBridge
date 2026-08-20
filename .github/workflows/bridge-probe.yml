@@ -1,10 +1,11 @@
 name: DownloadBridge 本地传输探针
 
 on:
-  push:
-    paths:
-      - .github/workflows/bridge-probe.yml
   workflow_dispatch:
+
+concurrency:
+  group: downloadbridge-probe
+  cancel-in-progress: true
 
 permissions:
   contents: write
