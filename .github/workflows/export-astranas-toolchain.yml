@@ -1,0 +1,31 @@
+name: Export AstraNAS pinned toolchain
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download pinned AstraNAS toolchain release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/astranas-devkitpro-v1/devkitpro-switch-astranas.tar.gz"
+          curl --fail --location --retry 3 --retry-delay 2 --connect-timeout 20 \
+            --output devkitpro-switch-astranas.tar.gz "$url"
+          printf '%s  %s\n' \
+            'af4ec72ba7c20b7aedc79f5d63bffa842e2665e740a878cc78c13d34051791b9' \
+            'devkitpro-switch-astranas.tar.gz' | sha256sum -c -
+      - name: Upload pinned toolchain as workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: astranas-devkitpro-v1-export
+          path: devkitpro-switch-astranas.tar.gz
+          if-no-files-found: error
+          retention-days: 1
