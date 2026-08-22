@@ -1,0 +1,31 @@
+name: Export AtmoXL completion sound
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export-sound:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download and verify original AtmoXL fertig.wav
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          curl --fail --location --retry 3 --retry-delay 2 \
+            --output payload/fertig.wav \
+            'https://raw.githubusercontent.com/dezem/AtmoXL-Titel-Installer/8516930078991664243e07fc0d03b31e6e781eb2/romfs/audio/fertig.wav'
+          test "$(git hash-object payload/fertig.wav)" = '53320441588ddc0b6a647239effe1d6ebfe6b2a5'
+          sha256sum payload/fertig.wav > payload/fertig.wav.sha256
+      - name: Upload original sound
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atmoxl-fertig-original
+          path: payload/
+          if-no-files-found: error
+          retention-days: 1
