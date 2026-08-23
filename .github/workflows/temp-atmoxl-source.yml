@@ -7,7 +7,7 @@ on:
       - .github/workflows/temp-atmoxl-source.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export:
@@ -32,3 +32,19 @@ jobs:
             AtmoXL-1.7.3-source.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
+      - name: Record run id for retrieval
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init marker
+          git -C marker config user.name github-actions
+          git -C marker config user.email github-actions@github.com
+          git -C marker remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git -C marker fetch --depth=1 origin main
+          git -C marker checkout -B main FETCH_HEAD
+          printf '{"run_id":%s,"sha":"%s","source_commit":"dbddfb704e47204343afa483949fadc4e5013230"}\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > marker/last_atmoxl_source_run.json
+          git -C marker add last_atmoxl_source_run.json
+          git -C marker commit -m "ci: record temporary AtmoXL bridge run"
+          git -C marker push origin HEAD:main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
