@@ -1,0 +1,34 @@
+name: Temporary AtmoXL source bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/temp-atmoxl-source.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch pinned AtmoXL source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 1.7.3 https://github.com/dezem/AtmoXL-Titel-Installer.git source
+          test "$(git -C source rev-parse HEAD)" = "dbddfb704e47204343afa483949fadc4e5013230"
+          rm -rf source/.git
+          tar -czf AtmoXL-1.7.3-source.tar.gz source
+          sha256sum AtmoXL-1.7.3-source.tar.gz > AtmoXL-1.7.3-source.tar.gz.sha256
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: atmoxl-1.7.3-source
+          path: |
+            AtmoXL-1.7.3-source.tar.gz
+            AtmoXL-1.7.3-source.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
