@@ -1,4 +1,5 @@
-status=started
+status=success
 run_id=32730431589
 artifact=chatgpt-atmoxl-fertig
 source_commit=8516930078991664243e07fc0d03b31e6e781eb2
+blob=53320441588ddc0b6a647239effe1d6ebfe6b2a5
