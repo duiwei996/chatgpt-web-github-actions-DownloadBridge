@@ -1,4 +1,5 @@
-status=started
+status=success
 run_id=32729977209
 artifact=chatgpt-devkitpro-switch-astranas
+sha256=554de009397bc2a0cafb929a0d316d8acde4426a412e6b237568c63a9864ae65
 source_commit=0209c5151194c4943a54e55399f3487fdbc9fd6c
