@@ -1,0 +1,125 @@
+name: ChatGPT AstraNAS devkitPro rebuild
+
+on:
+  push:
+    branches:
+      - 'chatgpt/toolchain-rebuild-20260824'
+    paths:
+      - '.github/workflows/chatgpt-devkitpro-rebuild.yml'
+
+permissions:
+  contents: write
+
+env:
+  DEVKITPRO_IMAGE: 'devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282'
+  LIBSMB2_COMMIT: '0b2aa4310c7a0510c666fe7da0eebce0f7e93824'
+  LIBUSBHSFS_COMMIT: '3b897ed6a79c910aa3f13693f17b80afb802b3b5'
+  ARTIFACT_NAME: 'chatgpt-devkitpro-switch-astranas'
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
+    outputs:
+      sha256: ${{ steps.meta.outputs.sha256 }}
+    steps:
+      - name: Install AstraNAS Switch dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v dkp-pacman >/dev/null 2>&1; then PM=dkp-pacman; else PM=pacman; fi
+          "$PM" -S --needed --noconfirm \
+            switch-curl switch-libjson-c switch-ntfs-3g switch-lwext4 \
+            switch-freetype switch-harfbuzz switch-libjpeg-turbo
+
+          libsmb2_tmp="$(mktemp -d /tmp/astranas-libsmb2.XXXXXX)"
+          git init -q "$libsmb2_tmp"
+          git -C "$libsmb2_tmp" remote add origin https://github.com/sahlberg/libsmb2.git
+          git -C "$libsmb2_tmp" fetch --depth 1 origin "$LIBSMB2_COMMIT"
+          git -C "$libsmb2_tmp" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$libsmb2_tmp" rev-parse HEAD)" = "$LIBSMB2_COMMIT"
+          make -C "$libsmb2_tmp" -f Makefile.platform switch_install
+
+          usbhsfs_tmp="$(mktemp -d /tmp/astranas-usbhsfs.XXXXXX)"
+          git init -q "$usbhsfs_tmp"
+          git -C "$usbhsfs_tmp" remote add origin https://github.com/DarkMatterCore/libusbhsfs.git
+          git -C "$usbhsfs_tmp" fetch --depth 1 origin "$LIBUSBHSFS_COMMIT"
+          git -C "$usbhsfs_tmp" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$usbhsfs_tmp" rev-parse HEAD)" = "$LIBUSBHSFS_COMMIT"
+          make -C "$usbhsfs_tmp" BUILD_TYPE=GPL install
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /opt/devkitpro/devkitA64/bin/aarch64-none-elf-g++
+          test -f /opt/devkitpro/cmake/Switch.cmake
+          test -x /opt/devkitpro/tools/bin/elf2nro
+          test -x /opt/devkitpro/tools/bin/nacptool
+          test -f /opt/devkitpro/libnx/include/switch.h
+          test -f /opt/devkitpro/portlibs/switch/include/curl/curl.h
+          test -f /opt/devkitpro/portlibs/switch/include/smb2/smb2.h
+          test -f /opt/devkitpro/portlibs/switch/lib/libsmb2.a
+          test -f /opt/devkitpro/portlibs/switch/lib/libusbhsfs.a
+
+      - name: Package portable toolchain
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          if command -v dkp-pacman >/dev/null 2>&1; then dkp-pacman -Q > payload/devkitpro-packages.txt; else pacman -Q > payload/devkitpro-packages.txt; fi
+          printf '%s\n' \
+            "DEVKITPRO_IMAGE=$DEVKITPRO_IMAGE" \
+            'DEVKITPRO=/opt/devkitpro' \
+            'DEVKITA64=/opt/devkitpro/devkitA64' \
+            "LIBSMB2_COMMIT=$LIBSMB2_COMMIT" \
+            "LIBUSBHSFS_COMMIT=$LIBUSBHSFS_COMMIT" \
+            "GITHUB_SHA=$GITHUB_SHA" \
+            "GITHUB_RUN_ID=$GITHUB_RUN_ID" \
+            > payload/environment.txt
+          tar -C /opt -czf payload/devkitpro-switch-astranas.tar.gz \
+            devkitpro/devkitA64 \
+            devkitpro/libnx \
+            devkitpro/portlibs/switch \
+            devkitpro/tools \
+            devkitpro/cmake
+          sha256sum payload/devkitpro-switch-astranas.tar.gz > payload/SHA256SUMS.txt
+          sha="$(cut -d' ' -f1 payload/SHA256SUMS.txt)"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload toolchain artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: payload/
+          if-no-files-found: error
+          retention-days: 7
+
+  record:
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 'chatgpt/toolchain-rebuild-20260824'
+          fetch-depth: 1
+      - name: Record run metadata for retrieval
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .bridge
+          cat > .bridge/chatgpt-devkitpro-run.txt <<EOF
+          status=success
+          run_id=$GITHUB_RUN_ID
+          artifact=$ARTIFACT_NAME
+          sha256=${{ needs.bundle.outputs.sha256 }}
+          source_commit=$GITHUB_SHA
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .bridge/chatgpt-devkitpro-run.txt
+          git commit -m 'ci: record ChatGPT devkitPro rebuild run'
+          git push origin HEAD:'chatgpt/toolchain-rebuild-20260824'
