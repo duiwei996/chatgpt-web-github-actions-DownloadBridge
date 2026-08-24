@@ -1,0 +1,92 @@
+name: ChatGPT AtmoXL completion sound bridge
+
+on:
+  push:
+    branches:
+      - 'chatgpt/toolchain-rebuild-20260824'
+    paths:
+      - '.github/workflows/chatgpt-atmoxl-audio.yml'
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_COMMIT: '8516930078991664243e07fc0d03b31e6e781eb2'
+  EXPECTED_BLOB: '53320441588ddc0b6a647239effe1d6ebfe6b2a5'
+  ARTIFACT_NAME: 'chatgpt-atmoxl-fertig'
+
+jobs:
+  record_start:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 'chatgpt/toolchain-rebuild-20260824'
+          fetch-depth: 1
+      - name: Record run id
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .bridge
+          cat > .bridge/chatgpt-atmoxl-run.txt <<EOF
+          status=started
+          run_id=$GITHUB_RUN_ID
+          artifact=$ARTIFACT_NAME
+          source_commit=$SOURCE_COMMIT
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .bridge/chatgpt-atmoxl-run.txt
+          git commit -m 'ci: record AtmoXL audio bridge start'
+          git push origin HEAD:'chatgpt/toolchain-rebuild-20260824'
+
+  audio:
+    runs-on: ubuntu-latest
+    outputs:
+      blob: ${{ steps.fetch.outputs.blob }}
+    steps:
+      - name: Fetch and verify pinned fertig.wav
+        id: fetch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          url="https://raw.githubusercontent.com/dezem/AtmoXL-Titel-Installer/$SOURCE_COMMIT/romfs/audio/fertig.wav"
+          curl --fail --location --retry 3 --output payload/fertig.wav "$url"
+          blob="$(git hash-object payload/fertig.wav)"
+          test "$blob" = "$EXPECTED_BLOB"
+          echo "blob=$blob" >> "$GITHUB_OUTPUT"
+          printf 'source_commit=%s\nblob=%s\n' "$SOURCE_COMMIT" "$blob" > payload/metadata.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: payload/
+          if-no-files-found: error
+          retention-days: 7
+
+  record_success:
+    needs: audio
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 'chatgpt/toolchain-rebuild-20260824'
+          fetch-depth: 1
+      - name: Record successful bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --ff-only origin 'chatgpt/toolchain-rebuild-20260824'
+          mkdir -p .bridge
+          cat > .bridge/chatgpt-atmoxl-run.txt <<EOF
+          status=success
+          run_id=$GITHUB_RUN_ID
+          artifact=$ARTIFACT_NAME
+          source_commit=$SOURCE_COMMIT
+          blob=${{ needs.audio.outputs.blob }}
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .bridge/chatgpt-atmoxl-run.txt
+          git commit -m 'ci: record AtmoXL audio bridge success'
+          git push origin HEAD:'chatgpt/toolchain-rebuild-20260824'
