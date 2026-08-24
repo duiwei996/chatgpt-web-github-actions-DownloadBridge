@@ -7,6 +7,10 @@ on:
     paths:
       - '.github/workflows/chatgpt-devkitpro-rebuild.yml'
 
+concurrency:
+  group: chatgpt-astranas-devkitpro-rebuild
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -17,6 +21,30 @@ env:
   ARTIFACT_NAME: 'chatgpt-devkitpro-switch-astranas'
 
 jobs:
+  record_start:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 'chatgpt/toolchain-rebuild-20260824'
+          fetch-depth: 1
+      - name: Record run id immediately
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .bridge
+          cat > .bridge/chatgpt-devkitpro-run.txt <<EOF
+          status=started
+          run_id=$GITHUB_RUN_ID
+          artifact=$ARTIFACT_NAME
+          source_commit=$GITHUB_SHA
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .bridge/chatgpt-devkitpro-run.txt
+          git commit -m 'ci: record ChatGPT devkitPro rebuild start'
+          git push origin HEAD:'chatgpt/toolchain-rebuild-20260824'
+
   bundle:
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -98,7 +126,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  record:
+  record_success:
     needs: bundle
     runs-on: ubuntu-latest
     steps:
@@ -106,10 +134,11 @@ jobs:
         with:
           ref: 'chatgpt/toolchain-rebuild-20260824'
           fetch-depth: 1
-      - name: Record run metadata for retrieval
+      - name: Record successful artifact metadata
         shell: bash
         run: |
           set -euo pipefail
+          git pull --ff-only origin 'chatgpt/toolchain-rebuild-20260824'
           mkdir -p .bridge
           cat > .bridge/chatgpt-devkitpro-run.txt <<EOF
           status=success
@@ -121,5 +150,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .bridge/chatgpt-devkitpro-run.txt
-          git commit -m 'ci: record ChatGPT devkitPro rebuild run'
+          git commit -m 'ci: record ChatGPT devkitPro rebuild success'
           git push origin HEAD:'chatgpt/toolchain-rebuild-20260824'
