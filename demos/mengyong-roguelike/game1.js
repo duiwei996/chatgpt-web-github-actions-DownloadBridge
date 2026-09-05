@@ -11,9 +11,8 @@ const ASSET_NAMES=[
 'item_coin','item_gem','item_chest','item_potion','item_magnet','item_boots','item_crown','item_armor','item_revive','item_wand'
 ];
 const A={};
-const ATLAS_RECTS={"bat":[2,2,60,39],"bee":[64,2,58,51],"blade_fx":[124,2,71,57],"boar":[197,2,94,72],"boss_mushroom":[293,2,162,124],"boss_tree":[457,2,129,116],"fireball_fx":[2,128,70,61],"ghost":[74,128,53,50],"hero_attack":[129,128,69,68],"hero_cast":[200,128,76,76],"hero_hurt":[278,128,69,68],"hero_idle":[349,128,53,76],"hero_run":[404,128,63,70],"hero_win":[469,128,62,74],"ice_fx":[533,128,80,65],"item_armor":[2,206,75,69],"item_bomb":[79,206,70,75],"item_boots":[151,206,71,59],"item_chest":[224,206,74,75],"item_coin":[300,206,70,75],"item_crown":[372,206,74,64],"item_gem":[448,206,66,75],"item_key":[516,206,63,75],"item_magnet":[2,283,72,75],"item_potion":[76,283,64,64],"item_revive":[142,283,75,68],"item_wand":[219,283,75,64],"leaf_fx":[296,283,75,62],"lightning_fx":[373,283,77,72],"mushroom":[452,283,57,49],"skeleton":[511,283,52,56],"skeleton_shield":[565,283,62,65],"skill_blades":[2,360,73,75],"skill_fire":[77,360,69,66],"skill_heal":[148,360,75,60],"skill_ice":[225,360,66,63],"skill_laser":[293,360,75,63],"skill_leaf":[370,360,69,75],"skill_lightning":[441,360,72,67],"skill_meteor":[515,360,74,75],"skill_poison":[2,437,72,62],"skill_shield":[76,437,74,64],"skill_spirit":[152,437,70,62],"skill_tornado":[224,437,73,75],"slime":[299,437,54,39]};
-let loaded=0;
-const atlasImage=new Image();atlasImage.src='data:image/webp;base64,'+(window.__ATLAS_B64||'');atlasImage.onload=()=>{for(const n of ASSET_NAMES){const r=ATLAS_RECTS[n];if(r)A[n]={atlas:atlasImage,rect:r,complete:true,naturalWidth:r[2],naturalHeight:r[3]};}loaded=ASSET_NAMES.length;};atlasImage.onerror=()=>{loaded=ASSET_NAMES.length;};
+for(const n of ASSET_NAMES) A[n]={fallback:true,name:n,complete:true,naturalWidth:64,naturalHeight:64};
+let loaded=ASSET_NAMES.length;
 
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const rand=(a,b)=>a+Math.random()*(b-a);
