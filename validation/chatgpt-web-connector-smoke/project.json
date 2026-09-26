@@ -1,6 +1,7 @@
 {
   "name": "chatgpt-web-connector-smoke",
   "purpose": "验证 ChatGPT Web GitHub 连接器的分支、多文件原子提交及回读能力",
+  "phase": "post-global-rule-update",
   "files": [
     "README.md",
     "project.json"
